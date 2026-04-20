@@ -1,0 +1,74 @@
+server:
+  port: 8080  # API Gateway expose duy nhất port này ra ngoài
+
+spring:
+  application:
+    name: api-gateway
+
+  cloud:
+    gateway:
+      routes:
+        # ═══════════════════════════════════════════════════
+        # PUBLIC ROUTES — không cần JWT
+        # Phải khai báo TRƯỚC protected routes cùng prefix
+        # vì Gateway match theo thứ tự từ trên xuống
+        # ═══════════════════════════════════════════════════
+        - id: user-auth
+          uri: http://localhost:8081
+          predicates:
+            - Path=/api/users/auth/**
+          # /api/users/auth/login  → user-service:8081/api/users/auth/login
+          # /api/users/auth/register → user-service:8081/api/users/auth/register
+
+        # ═══════════════════════════════════════════════════
+        # PROTECTED ROUTES — JwtAuthFilter sẽ check token
+        # ═══════════════════════════════════════════════════
+        - id: user-service
+          uri: http://localhost:8081
+          predicates:
+            - Path=/api/users/**
+
+        - id: product-service
+          uri: http://localhost:8082
+          predicates:
+            - Path=/api/products/**
+
+        - id: order-service
+          uri: http://localhost:8083
+          predicates:
+            - Path=/api/orders/**
+
+        - id: import-service
+          uri: http://localhost:8084
+          predicates:
+            - Path=/api/imports/**
+
+        - id: report-service
+          uri: http://localhost:8085
+          predicates:
+            - Path=/api/reports/**
+
+# ═══════════════════════════════════════════════════════════
+# App config — đọc bởi RouteConfig và JwtAuthFilter
+# ═══════════════════════════════════════════════════════════
+app:
+  jwt:
+    secret: groceryflow-dev-secret-key-minimum-32-chars!!
+    # secret: key để sign và verify JWT
+    # QUAN TRỌNG: đổi thành random string dài khi deploy production
+    # HMAC-SHA256 yêu cầu key tối thiểu 32 bytes
+
+  public-paths:
+    - /api/users/auth/login
+    - /api/users/auth/register
+    - /actuator/**
+    # /actuator/**: health check endpoint của Spring Boot Actuator
+    # Cần accessible không cần auth để monitoring tools check được
+
+# ═══════════════════════════════════════════════════════════
+# Logging — để thấy JWT check trong console khi dev
+# ═══════════════════════════════════════════════════════════
+logging:
+  level:
+    com.groceryflow.apigateway: DEBUG
+    org.springframework.cloud.gateway: INFO

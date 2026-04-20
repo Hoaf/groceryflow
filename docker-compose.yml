@@ -1,0 +1,215 @@
+services:
+# services: danh sách các container sẽ được tạo
+# Mỗi key bên dưới (mysql, redis, kafka) = 1 container
+
+  # ════════════════════════════════════════════════
+  # MySQL 8.4 — database cho tất cả services
+  #
+  # Tại sao 1 container cho tất cả services?
+  # → Dev local không cần isolation cao
+  # → Nhẹ hơn nhiều so với 6 container MySQL riêng
+  # → Mỗi service kết nối vào database riêng của nó
+  #   (groceryflow_users, groceryflow_products, ...)
+  #
+  # Port 3307 thay vì 3306 → tránh conflict MySQL cũ đang chạy trên máy
+  # ════════════════════════════════════════════════
+  mysql:
+    image: mysql:8.4
+    # image: Docker image dùng để tạo container
+    # Tìm trên hub.docker.com, format: <tên>:<version>
+    # Nếu không có :version → tự động dùng :latest (không nên dùng latest trong prod)
+
+    container_name: groceryflow-mysql
+    # container_name: đặt tên cố định cho container
+    # Không đặt → Docker tự đặt tên ngẫu nhiên (vd: grocery_flow_mysql_1)
+    # Đặt tên cố định → dễ dùng lệnh docker exec groceryflow-mysql ...
+
+    environment:
+    # environment: biến môi trường truyền vào container khi khởi động
+    # MySQL image đọc các biến này để tự cấu hình lần đầu
+      MYSQL_ROOT_PASSWORD: root
+      # MYSQL_ROOT_PASSWORD: mật khẩu cho user root (toàn quyền)
+      # Dùng để admin, KHÔNG dùng trong ứng dụng
+      MYSQL_USER: groceryflow
+      # MYSQL_USER: tạo thêm 1 user thường, ứng dụng dùng user này
+      MYSQL_PASSWORD: groceryflow
+      # MYSQL_PASSWORD: mật khẩu cho MYSQL_USER ở trên
+
+    ports:
+    # ports: map port giữa host machine và container
+    # Format: "host_port:container_port"
+    # MySQL bên trong container luôn chạy port 3306
+    # Ta map ra ngoài thành 3307 để tránh conflict MySQL cũ
+      - "3307:3306"
+    # Kết nối từ bên ngoài: localhost:3307
+    # Kết nối từ trong Docker network: groceryflow-mysql:3306
+
+    volumes:
+    # volumes: mount dữ liệu giữa host và container
+    # Mục đích: data KHÔNG bị mất khi container bị xóa/restart
+    # Nếu không có volumes → docker-compose down là mất hết data
+      - mysql_data:/var/lib/mysql
+      # mysql_data: tên volume (khai báo ở cuối file)
+      # /var/lib/mysql: nơi MySQL lưu data bên trong container
+      # → Docker quản lý volume này tại C:\ProgramData\docker\volumes\
+
+      - ./docker/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
+      # Mount file init.sql từ host vào container
+      # /docker-entrypoint-initdb.d/: thư mục đặc biệt của MySQL image
+      # → Mọi file .sql trong thư mục này được chạy TỰ ĐỘNG khi khởi động lần đầu
+      # → Nếu volume đã có data rồi thì KHÔNG chạy lại (tránh xóa data)
+
+    networks:
+    # networks: kết nối container vào mạng nội bộ
+    # Các container cùng network → gọi nhau bằng tên container
+    # Ví dụ: Spring Boot dùng URL "groceryflow-mysql:3306" thay vì "localhost:3306"
+      - groceryflow-net
+
+    healthcheck:
+    # healthcheck: Docker định kỳ chạy lệnh này để kiểm tra container có healthy không
+    # Các container khác dùng depends_on condition: service_healthy
+    # → Chờ MySQL thật sự sẵn sàng nhận kết nối trước khi start
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
+      interval: 10s   # kiểm tra mỗi 10 giây
+      timeout: 5s     # timeout nếu lệnh chạy quá 5 giây
+      retries: 5      # thử lại 5 lần trước khi báo unhealthy
+
+  # ════════════════════════════════════════════════
+  # Redis 7 — Cache + Distributed Lock + JWT Blacklist
+  # alpine = bản Linux tối giản, image nhỏ hơn (~30MB vs ~100MB)
+  # ════════════════════════════════════════════════
+  redis:
+    image: redis:7-alpine
+    container_name: groceryflow-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    # command: override lệnh mặc định khi container start
+    # Mặc định Redis chạy: redis-server (không có flag gì)
+    # Ta thêm --appendonly yes để bật AOF persistence:
+    # → Ghi mọi thao tác write xuống file appendonly.aof
+    # → Restart container → đọc lại file này → data không mất
+    # → Nếu không có flag: Redis chỉ lưu trong RAM → restart là mất hết
+    volumes:
+      - redis_data:/data
+      # /data: thư mục Redis lưu file AOF và RDB snapshot
+    networks:
+      - groceryflow-net
+
+  # ════════════════════════════════════════════════
+  # Kafka 3.7 — Message Broker, KRaft mode (không cần Zookeeper)
+  # ════════════════════════════════════════════════
+  kafka:
+    image: apache/kafka:latest
+    # apache/kafka: image chính thức từ Apache (không phải bitnami)
+    # Hỗ trợ KRaft mode sẵn, không cần Zookeeper
+
+    container_name: groceryflow-kafka
+    hostname: broker
+    # hostname: tên host bên trong container
+    # Kafka dùng hostname này để bind listeners và advertise địa chỉ
+    # KAFKA_LISTENERS dùng "broker:29092", "broker:29093" → phải khớp hostname này
+    # Nếu không set → hostname mặc định là container ID (chuỗi hex) → không resolve được
+    ports:
+      - "9092:9092"    # dùng khi Spring Boot chạy NGOÀI Docker (mvn spring-boot:run)
+      - "29092:29092"  # dùng khi Spring Boot chạy TRONG Docker (sau này)
+    environment:
+      KAFKA_BROKER_ID: 1
+      # Broker ID duy nhất trong cluster, chỉ có 1 broker → đặt là 1
+
+      KAFKA_NODE_ID: 1
+      # Node ID cho KRaft mode, phải khớp với KAFKA_BROKER_ID
+
+      KAFKA_PROCESS_ROLES: broker,controller
+      # Broker đóng 2 vai cùng lúc (KRaft mode):
+      # broker:     nhận và lưu message từ producer, gửi cho consumer
+      # controller: quản lý metadata cluster (thay Zookeeper)
+
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@broker:29093
+      # Danh sách các controller tham gia bầu leader
+      # Format: nodeId@host:port — chỉ có 1 broker nên chỉ có mình nó
+
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
+      # Map tên listener → protocol bảo mật
+      # Dev local dùng PLAINTEXT (không mã hóa)
+      # Production nên dùng SSL hoặc SASL_SSL
+
+      KAFKA_LISTENERS: PLAINTEXT://broker:29092,CONTROLLER://broker:29093,PLAINTEXT_HOST://0.0.0.0:9092
+      # Các địa chỉ Kafka lắng nghe kết nối đến:
+      # PLAINTEXT:      port 29092 → nhận từ service trong Docker network
+      # CONTROLLER:     port 29093 → KRaft dùng nội bộ để sync metadata
+      # PLAINTEXT_HOST: port 9092  → nhận từ host machine (0.0.0.0 = tất cả interface)
+
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker:29092,PLAINTEXT_HOST://localhost:9092
+      # Địa chỉ Kafka "quảng cáo" cho client sau khi kết nối lần đầu
+      # PLAINTEXT      → "broker:29092"   (resolve được trong Docker network)
+      # PLAINTEXT_HOST → "localhost:9092" (resolve được từ host machine)
+
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # Listener dùng để các broker giao tiếp với nhau (nội bộ cluster)
+
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # Listener dành riêng cho KRaft controller
+
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      # Số bản sao của topic __consumer_offsets (lưu vị trí đọc của consumer)
+      # Dev: 1 (chỉ có 1 broker nên không thể > 1)
+
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      # Tương tự, replication factor cho transaction log
+      # ISR = In-Sync Replicas: số replica phải đồng bộ trước khi ghi thành công
+
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # Thời gian chờ trước khi rebalance consumer group lần đầu
+      # Dev: 0 = không chờ, start ngay → tiện cho test
+
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      # Thư mục lưu message và metadata trong container
+      # Dùng /var/lib/kafka/data thay vì /tmp/kraft-combined-logs vì:
+      # → apache/kafka image tạo sẵn thư mục này với đúng ownership (user kafka)
+      # → /tmp bị lỗi AccessDeniedException khi mount Docker volume vào
+      #   (Docker volume owned bởi root, Kafka user không ghi được)
+
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      # ID cố định của cluster cho KRaft mode
+      # Phải là base64 encoded UUID, giữ cố định để không mất data khi restart
+
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+      # Mount vào /var/lib/kafka/data thay vì /tmp
+      # → Thư mục này được image tạo sẵn với đúng quyền cho Kafka user
+      # → Data persist khi restart container
+    networks:
+      - groceryflow-net
+
+# ════════════════════════════════════════════════
+# VOLUMES
+# Khai báo các named volume được dùng ở trên
+# Docker tạo và quản lý các thư mục này trên host
+# Lệnh hữu ích:
+#   docker volume ls                    → xem danh sách volumes
+#   docker volume inspect mysql_data    → xem chi tiết
+#   docker-compose down -v              → xóa containers VÀ volumes (mất data!)
+#   docker-compose down                 → chỉ xóa containers, giữ volumes
+# ════════════════════════════════════════════════
+volumes:
+  mysql_data:   # lưu data MySQL (/var/lib/mysql)
+  redis_data:   # lưu AOF file của Redis (/data)
+  kafka_data:   # lưu message và metadata Kafka (/var/lib/kafka/data)
+
+# ════════════════════════════════════════════════
+# NETWORKS
+# Tạo mạng nội bộ cho các container giao tiếp với nhau
+# Các container cùng network:
+#   → gọi nhau bằng container_name (vd: "groceryflow-mysql")
+#   → không cần biết IP, Docker tự resolve
+# Các container KHÁC network:
+#   → không thể giao tiếp trực tiếp (isolated)
+# ════════════════════════════════════════════════
+networks:
+  groceryflow-net:
+    driver: bridge
+    # bridge: loại network phổ biến nhất cho single-host
+    # Mỗi container có IP riêng trong subnet ảo
+    # Các loại khác: host (dùng network của host), overlay (multi-host K8s)
