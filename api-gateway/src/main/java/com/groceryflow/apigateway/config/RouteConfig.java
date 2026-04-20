@@ -23,9 +23,3 @@ public class RouteConfig {
         this.publicPaths = publicPaths;
     }
 }
-3 vòng
-1 - hiện tại
-2 - leetcode
-3 - tech lead
-4 - team size
-5 - device allowance -
