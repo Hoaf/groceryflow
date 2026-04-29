@@ -3,6 +3,7 @@ package com.groceryflow.apigateway.config;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 
+import java.util.Collections;
 import java.util.List;
 
 @Configuration
@@ -14,9 +15,10 @@ public class RouteConfig {
 
     private List<String> publicPaths;
 
-    // Getter/Setter thủ công vì @ConfigurationProperties cần setter để inject
     public List<String> getPublicPaths() {
-        return publicPaths;
+        // unmodifiableList: tránh caller vô tình mutate list config
+        // Collections.unmodifiableList ném UnsupportedOperationException nếu ai gọi .add()/.remove()
+        return Collections.unmodifiableList(publicPaths);
     }
 
     public void setPublicPaths(List<String> publicPaths) {

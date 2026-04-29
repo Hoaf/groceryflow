@@ -3,8 +3,10 @@ package com.groceryflow.apigateway.filter;
 import com.groceryflow.apigateway.config.RouteConfig;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
+import io.jsonwebtoken.JwtParser;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -19,7 +21,6 @@ import org.springframework.util.AntPathMatcher;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
-import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 
 // ═══════════════════════════════════════════════════════════
@@ -63,51 +64,57 @@ import java.nio.charset.StandardCharsets;
 @RequiredArgsConstructor
 public class JwtAuthFilter implements GlobalFilter, Ordered {
 
+    // Constants — tránh magic strings rải rác trong code
+    private static final String BEARER_PREFIX = "Bearer ";
+    private static final String HEADER_USER_ID = "X-User-Id";
+    private static final String HEADER_USER_ROLE = "X-User-Role";
+    private static final String CLAIM_ROLE = "role";
+
     private final RouteConfig routeConfig;
+    private final AntPathMatcher pathMatcher = new AntPathMatcher();
 
     @Value("${app.jwt.secret}")
     private String jwtSecret;
 
-    // AntPathMatcher: so khớp URL pattern kiểu Ant (/api/users/auth/**)
-    private final AntPathMatcher pathMatcher = new AntPathMatcher();
+    // Cache SecretKey và JwtParser — khởi tạo 1 lần lúc startup, tái dùng cho mọi request
+    // Lý do: Keys.hmacShaKeyFor() và Jwts.parser().build() tốn CPU, không nên gọi mỗi request
+    private JwtParser jwtParser;
+
+    @PostConstruct
+    // @PostConstruct: chạy sau khi Spring inject xong tất cả dependencies
+    // Đây là nơi an toàn để khởi tạo các object phụ thuộc vào @Value
+    void init() {
+        jwtParser = Jwts.parser()
+                .verifyWith(Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8)))
+                .build();
+    }
 
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, GatewayFilterChain chain) {
         String path = exchange.getRequest().getPath().value();
 
-        // Bước 1: Kiểm tra public path → skip JWT check
         if (isPublicPath(path)) {
-            log.debug("Public path, skipping JWT check: {}", path);
             return chain.filter(exchange);
         }
 
-        // Bước 2: Lấy token từ Authorization header
         String authHeader = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
 
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+        if (authHeader == null || !authHeader.startsWith(BEARER_PREFIX)) {
             log.warn("Missing or invalid Authorization header for path: {}", path);
             return unauthorized(exchange);
         }
 
-        String token = authHeader.substring(7); // bỏ "Bearer " (7 ký tự)
+        String token = authHeader.substring(BEARER_PREFIX.length());
 
-        // Bước 3: Validate token
         try {
-            Claims claims = validateToken(token);
+            Claims claims = jwtParser.parseSignedClaims(token).getPayload();
 
-            // Bước 4: Lấy user info từ claims, forward xuống service qua header
-            // ─────────────────────────────────────────────────────────────
-            // Tại sao forward qua header thay vì gọi lại Gateway?
-            // → Service cần biết user nào đang gọi (để lưu created_by, check quyền)
-            // → Forward qua header: đơn giản, không cần thêm round-trip
-            // → Dùng prefix X- để phân biệt với header chuẩn HTTP
-            // ─────────────────────────────────────────────────────────────
             String userId = claims.getSubject();
-            String userRole = claims.get("role", String.class);
+            String userRole = claims.get(CLAIM_ROLE, String.class);
 
             ServerHttpRequest mutatedRequest = exchange.getRequest().mutate()
-                    .header("X-User-Id", userId)
-                    .header("X-User-Role", userRole != null ? userRole : "")
+                    .header(HEADER_USER_ID, userId)
+                    .header(HEADER_USER_ROLE, userRole != null ? userRole : "")
                     .build();
 
             log.debug("JWT valid for user: {}, role: {}", userId, userRole);
@@ -124,27 +131,13 @@ public class JwtAuthFilter implements GlobalFilter, Ordered {
                 .anyMatch(pattern -> pathMatcher.match(pattern, path));
     }
 
-    private Claims validateToken(String token) {
-        // Keys.hmacShaKeyFor: tạo SecretKey từ secret string
-        // JJWT 0.12.x dùng parseSignedClaims thay vì parseClaimsJws (deprecated)
-        SecretKey key = Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8));
-        return Jwts.parser()
-                .verifyWith(key)
-                .build()
-                .parseSignedClaims(token)
-                .getPayload();
-    }
-
     private Mono<Void> unauthorized(ServerWebExchange exchange) {
         exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
         return exchange.getResponse().setComplete();
-        // setComplete(): kết thúc response, không forward xuống service
     }
 
     @Override
     public int getOrder() {
         return -1;
-        // getOrder(): thứ tự ưu tiên của filter, số càng nhỏ càng chạy trước
-        // -1: chạy trước tất cả filter mặc định của Spring Cloud Gateway
     }
 }

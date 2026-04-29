@@ -1,0 +1,340 @@
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+.wrap{padding:16px 8px;font-family:var(--font-sans)}
+.cards{display:flex;flex-direction:column;gap:10px}
+.card{border-radius:var(--border-radius-lg);border:0.5px solid var(--color-border-tertiary);overflow:hidden;cursor:pointer;transition:border-color .2s}
+.card:hover{border-color:var(--color-border-secondary)}
+.card.open{border-color:var(--color-border-primary)}
+.card-header{display:flex;align-items:center;gap:12px;padding:14px 16px;user-select:none}
+.badge{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;font-size:12px;font-weight:500;flex-shrink:0}
+.card-title{flex:1}
+.card-title .name{font-size:14px;font-weight:500;color:var(--color-text-primary)}
+.card-title .sub{font-size:12px;color:var(--color-text-secondary);margin-top:2px}
+.chevron{font-size:12px;color:var(--color-text-tertiary);transition:transform .2s}
+.card.open .chevron{transform:rotate(180deg)}
+.card-body{display:none;padding:0 16px 16px;border-top:0.5px solid var(--color-border-tertiary)}
+.card.open .card-body{display:block}
+.section{margin-top:12px}
+.section-label{font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.06em;color:var(--color-text-tertiary);margin-bottom:6px}
+.tags{display:flex;flex-wrap:wrap;gap:6px}
+.tag{font-size:12px;padding:3px 10px;border-radius:20px;border:0.5px solid var(--color-border-secondary);color:var(--color-text-secondary)}
+.pros-cons{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:0}
+.pc-box{border-radius:var(--border-radius-md);padding:8px 10px;border:0.5px solid var(--color-border-tertiary)}
+.pc-box .pc-label{font-size:11px;font-weight:500;margin-bottom:4px}
+.pc-box ul{padding-left:14px}
+.pc-box li{font-size:12px;color:var(--color-text-secondary);margin-bottom:2px}
+.use-case{font-size:12px;color:var(--color-text-secondary);line-height:1.6;margin-top:4px}
+.strength{display:inline-block;font-size:11px;font-weight:500;padding:2px 8px;border-radius:20px;margin-left:8px;vertical-align:middle}
+
+.s1 .badge{background:#EEEDFE;color:#3C3489}
+.s1.card{} 
+.s1 .strength{background:#EEEDFE;color:#3C3489}
+.s1 .pc-box.pro{background:#EAF3DE;border-color:#C0DD97}
+.s1 .pc-box.pro .pc-label{color:#27500A}
+.s1 .pc-box.con{background:#FCEBEB;border-color:#F7C1C1}
+.s1 .pc-box.con .pc-label{color:#791F1F}
+
+.s2 .badge{background:#E1F5EE;color:#085041}
+.s2 .strength{background:#E1F5EE;color:#085041}
+.s2 .pc-box.pro{background:#EAF3DE;border-color:#C0DD97}
+.s2 .pc-box.pro .pc-label{color:#27500A}
+.s2 .pc-box.con{background:#FCEBEB;border-color:#F7C1C1}
+.s2 .pc-box.con .pc-label{color:#791F1F}
+
+.s3 .badge{background:#E6F1FB;color:#0C447C}
+.s3 .strength{background:#E6F1FB;color:#0C447C}
+.s3 .pc-box.pro{background:#EAF3DE;border-color:#C0DD97}
+.s3 .pc-box.pro .pc-label{color:#27500A}
+.s3 .pc-box.con{background:#FCEBEB;border-color:#F7C1C1}
+.s3 .pc-box.con .pc-label{color:#791F1F}
+
+.s4 .badge{background:#FAEEDA;color:#633806}
+.s4 .strength{background:#FAEEDA;color:#633806}
+.s4 .pc-box.pro{background:#EAF3DE;border-color:#C0DD97}
+.s4 .pc-box.pro .pc-label{color:#27500A}
+.s4 .pc-box.con{background:#FCEBEB;border-color:#F7C1C1}
+.s4 .pc-box.con .pc-label{color:#791F1F}
+
+.s5 .badge{background:#F1EFE8;color:#444441}
+.s5 .strength{background:#F1EFE8;color:#444441}
+.s5 .pc-box.pro{background:#EAF3DE;border-color:#C0DD97}
+.s5 .pc-box.pro .pc-label{color:#27500A}
+.s5 .pc-box.con{background:#FCEBEB;border-color:#F7C1C1}
+.s5 .pc-box.con .pc-label{color:#791F1F}
+
+.legend{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;font-size:12px;color:var(--color-text-secondary);padding:0 4px}
+.legend-item{display:flex;align-items:center;gap:5px}
+.legend-dot{width:10px;height:10px;border-radius:50%}
+</style>
+
+<div class="wrap">
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:#7F77DD"></div>Strong</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#1D9E75"></div>Sequential</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#378ADD"></div>Causal</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#BA7517"></div>Eventual</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#888780"></div>Weak</div>
+</div>
+<div class="cards">
+
+<div class="card s1" onclick="toggle(this)">
+  <div class="card-header">
+    <div class="badge">1</div>
+    <div class="card-title">
+      <div class="name">Strong Consistency <span class="strength">Mạnh nhất</span></div>
+      <div class="sub">Mọi node thấy data mới nhất ngay lập tức</div>
+    </div>
+    <div class="chevron">▼</div>
+  </div>
+  <div class="card-body">
+    <div class="section">
+      <div class="section-label">Patterns implement</div>
+      <div class="tags">
+        <span class="tag">ACID Transaction</span>
+        <span class="tag">Two-Phase Commit (2PC)</span>
+        <span class="tag">Distributed Lock (Redis)</span>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-label">Dùng khi</div>
+      <div class="use-case">Thanh toán, trừ tồn kho, banking — sai 1 đồng không được chấp nhận</div>
+    </div>
+    <div class="section">
+      <div class="section-label">Ưu / Nhược</div>
+      <div class="pros-cons">
+        <div class="pc-box pro">
+          <div class="pc-label">Ưu điểm</div>
+          <ul>
+            <li>Data luôn chính xác</li>
+            <li>Không cần xử lý conflict</li>
+            <li>Dễ debug, đơn giản</li>
+          </ul>
+        </div>
+        <div class="pc-box con">
+          <div class="pc-label">Nhược điểm</div>
+          <ul>
+            <li>Chậm — phải chờ sync</li>
+            <li>Availability thấp hơn</li>
+            <li>Không scale tốt</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-label">GroceryFlow</div>
+      <div class="use-case">Tạo order + trừ kho, thanh toán, đăng nhập</div>
+    </div>
+  </div>
+</div>
+
+<div class="card s2" onclick="toggle(this)">
+  <div class="card-header">
+    <div class="badge">2</div>
+    <div class="card-title">
+      <div class="name">Sequential Consistency</div>
+      <div class="sub">Mọi node thấy đúng thứ tự, nhưng có thể trễ</div>
+    </div>
+    <div class="chevron">▼</div>
+  </div>
+  <div class="card-body">
+    <div class="section">
+      <div class="section-label">Patterns implement</div>
+      <div class="tags">
+        <span class="tag">Kafka single partition</span>
+        <span class="tag">Redis LIST</span>
+        <span class="tag">Single-threaded queue</span>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-label">Dùng khi</div>
+      <div class="use-case">Thứ tự xử lý quan trọng — import trước thì kho tăng sau</div>
+    </div>
+    <div class="section">
+      <div class="section-label">Ưu / Nhược</div>
+      <div class="pros-cons">
+        <div class="pc-box pro">
+          <div class="pc-label">Ưu điểm</div>
+          <ul>
+            <li>Thứ tự đảm bảo</li>
+            <li>Dễ reason về behavior</li>
+            <li>Kafka hỗ trợ sẵn</li>
+          </ul>
+        </div>
+        <div class="pc-box con">
+          <div class="pc-label">Nhược điểm</div>
+          <ul>
+            <li>Throughput giới hạn</li>
+            <li>1 partition = 1 consumer</li>
+            <li>Bottleneck khi scale</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-label">GroceryFlow</div>
+      <div class="use-case">Kafka events theo orderId — import.created trước stock.updated sau</div>
+    </div>
+  </div>
+</div>
+
+<div class="card s3" onclick="toggle(this)">
+  <div class="card-header">
+    <div class="badge">3</div>
+    <div class="card-title">
+      <div class="name">Causal Consistency</div>
+      <div class="sub">A gây ra B thì B luôn sau A</div>
+    </div>
+    <div class="chevron">▼</div>
+  </div>
+  <div class="card-body">
+    <div class="section">
+      <div class="section-label">Patterns implement</div>
+      <div class="tags">
+        <span class="tag">Kafka + partition key</span>
+        <span class="tag">Kafka + parentEventId</span>
+        <span class="tag">Vector Clock</span>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-label">Dùng khi</div>
+      <div class="use-case">Có quan hệ nhân quả — comment phải sau post, audit log phải đúng thứ tự</div>
+    </div>
+    <div class="section">
+      <div class="section-label">Ưu / Nhược</div>
+      <div class="pros-cons">
+        <div class="pc-box pro">
+          <div class="pc-label">Ưu điểm</div>
+          <ul>
+            <li>Linh hoạt hơn Sequential</li>
+            <li>Performance tốt hơn</li>
+            <li>Chỉ enforce khi cần</li>
+          </ul>
+        </div>
+        <div class="pc-box con">
+          <div class="pc-label">Nhược điểm</div>
+          <ul>
+            <li>Phức tạp hơn Eventual</li>
+            <li>Phải track parentEventId</li>
+            <li>Retry khi parent chưa xong</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-label">GroceryFlow</div>
+      <div class="use-case">Audit log — phiếu nhập trước, tồn kho tăng sau. Dùng partition key = importId</div>
+    </div>
+  </div>
+</div>
+
+<div class="card s4" onclick="toggle(this)">
+  <div class="card-header">
+    <div class="badge">4</div>
+    <div class="card-title">
+      <div class="name">Eventual Consistency <span class="strength">Phổ biến nhất MSA</span></div>
+      <div class="sub">Cuối cùng sẽ nhất quán, không đảm bảo thời gian</div>
+    </div>
+    <div class="chevron">▼</div>
+  </div>
+  <div class="card-body">
+    <div class="section">
+      <div class="section-label">Patterns implement</div>
+      <div class="tags">
+        <span class="tag">Saga Pattern</span>
+        <span class="tag">Outbox Pattern</span>
+        <span class="tag">Kafka + Idempotency</span>
+        <span class="tag">CQRS</span>
+        <span class="tag">Event Sourcing</span>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-label">Dùng khi</div>
+      <div class="use-case">Báo cáo doanh thu, notification, audit log, search index — delay vài giây chấp nhận được</div>
+    </div>
+    <div class="section">
+      <div class="section-label">Ưu / Nhược</div>
+      <div class="pros-cons">
+        <div class="pc-box pro">
+          <div class="pc-label">Ưu điểm</div>
+          <ul>
+            <li>Availability cao</li>
+            <li>Performance tốt</li>
+            <li>Scale tốt</li>
+            <li>Loosely coupled</li>
+          </ul>
+        </div>
+        <div class="pc-box con">
+          <div class="pc-label">Nhược điểm</div>
+          <ul>
+            <li>Tạm thời inconsistent</li>
+            <li>Cần idempotency</li>
+            <li>Khó debug</li>
+            <li>Compensate phức tạp</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-label">GroceryFlow</div>
+      <div class="use-case">Cập nhật doanh thu, cảnh báo tồn kho thấp, audit log, order ↔ product cross-service</div>
+    </div>
+  </div>
+</div>
+
+<div class="card s5" onclick="toggle(this)">
+  <div class="card-header">
+    <div class="badge">5</div>
+    <div class="card-title">
+      <div class="name">Weak Consistency <span class="strength">Yếu nhất</span></div>
+      <div class="sub">Không đảm bảo gì sau khi write</div>
+    </div>
+    <div class="chevron">▼</div>
+  </div>
+  <div class="card-body">
+    <div class="section">
+      <div class="section-label">Patterns implement</div>
+      <div class="tags">
+        <span class="tag">Fire and forget</span>
+        <span class="tag">UDP</span>
+        <span class="tag">No ACK</span>
+        <span class="tag">Memcached</span>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-label">Dùng khi</div>
+      <div class="use-case">Gaming, streaming, realtime sensor — tốc độ quan trọng hơn chính xác, mất data không sao</div>
+    </div>
+    <div class="section">
+      <div class="section-label">Ưu / Nhược</div>
+      <div class="pros-cons">
+        <div class="pc-box pro">
+          <div class="pc-label">Ưu điểm</div>
+          <ul>
+            <li>Nhanh nhất</li>
+            <li>Latency cực thấp</li>
+            <li>Đơn giản nhất</li>
+          </ul>
+        </div>
+        <div class="pc-box con">
+          <div class="pc-label">Nhược điểm</div>
+          <ul>
+            <li>Có thể mất data</li>
+            <li>Không đảm bảo gì</li>
+            <li>Không dùng cho business</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-label">GroceryFlow</div>
+      <div class="use-case">Dashboard realtime — refresh mỗi 5s, data cũ vài giây không ảnh hưởng</div>
+    </div>
+  </div>
+</div>
+
+</div>
+</div>
+<script>
+function toggle(card){card.classList.toggle('open')}
+</script>
