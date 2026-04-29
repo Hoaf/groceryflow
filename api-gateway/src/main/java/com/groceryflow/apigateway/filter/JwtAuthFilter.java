@@ -76,14 +76,14 @@ public class JwtAuthFilter implements GlobalFilter, Ordered {
     @Value("${app.jwt.secret}")
     private String jwtSecret;
 
-    // Cache SecretKey và JwtParser — khởi tạo 1 lần lúc startup, tái dùng cho mọi request
-    // Lý do: Keys.hmacShaKeyFor() và Jwts.parser().build() tốn CPU, không nên gọi mỗi request
+    // Cache JwtParser — khởi tạo 1 lần lúc startup, tái dùng cho mọi request
+    // Lý do: Jwts.parser().build() (kèm key setup) tốn CPU, không nên gọi mỗi request
     private JwtParser jwtParser;
 
-    @PostConstruct
     // @PostConstruct: chạy sau khi Spring inject xong tất cả dependencies
     // Đây là nơi an toàn để khởi tạo các object phụ thuộc vào @Value
-    void init() {
+    @PostConstruct
+    private void init() {
         jwtParser = Jwts.parser()
                 .verifyWith(Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8)))
                 .build();

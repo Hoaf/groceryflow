@@ -10,8 +10,9 @@ spring:
       routes:
         # ═══════════════════════════════════════════════════
         # PUBLIC ROUTES — không cần JWT
-        # Phải khai báo TRƯỚC protected routes cùng prefix
-        # vì Gateway match theo thứ tự từ trên xuống
+        # Route order chỉ quan trọng khi 2 pattern overlap và forward khác backend
+        # Ở đây user-auth và user-service đều → localhost:8081, thứ tự không ảnh hưởng routing
+        # JWT bypass kiểm soát qua public-paths list (JwtAuthFilter), không qua route order
         # ═══════════════════════════════════════════════════
         - id: user-auth
           uri: http://localhost:8081

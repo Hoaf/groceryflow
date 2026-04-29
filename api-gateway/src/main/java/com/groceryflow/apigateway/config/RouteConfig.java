@@ -16,12 +16,13 @@ public class RouteConfig {
     private List<String> publicPaths;
 
     public List<String> getPublicPaths() {
-        // unmodifiableList: tránh caller vô tình mutate list config
-        // Collections.unmodifiableList ném UnsupportedOperationException nếu ai gọi .add()/.remove()
-        return Collections.unmodifiableList(publicPaths);
+        return publicPaths;
     }
 
     public void setPublicPaths(List<String> publicPaths) {
-        this.publicPaths = publicPaths;
+        // unmodifiableList: tránh caller vô tình mutate list config
+        // Collections.unmodifiableList ném UnsupportedOperationException nếu ai gọi .add()/.remove()
+        // Wrap 1 lần trong setter — getPublicPaths() gọi mỗi request, không tạo wrapper mỗi lần
+        this.publicPaths = Collections.unmodifiableList(publicPaths);
     }
 }
