@@ -35,6 +35,14 @@
             <artifactId>jjwt-jackson</artifactId>
         </dependency>
 
+        <!-- Redis — để check blacklist trong JwtAuthFilter -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis-reactive</artifactId>
+            <!-- Dùng reactive vì Gateway là WebFlux (non-blocking)
+                 spring-boot-starter-data-redis (blocking) không tương thích tốt với WebFlux -->
+        </dependency>
+
         <!-- Lombok -->
         <dependency>
             <groupId>org.projectlombok</groupId>

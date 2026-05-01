@@ -28,6 +28,13 @@ spring:
     # baseline-on-migrate: nếu DB đã tồn tại trước khi dùng Flyway, không báo lỗi
     baseline-on-migrate: true
 
+  data:
+    redis:
+      # Dev: localhost (chạy mvn spring-boot:run trên host)
+      # Prod Docker: đổi thành groceryflow-redis (tên container trong Docker network)
+      host: localhost
+      port: 6379
+
 app:
   jwt:
     # Phải giống secret trong api-gateway — user-service sign, api-gateway verify

@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cloud.gateway.filter.GatewayFilterChain;
 import org.springframework.cloud.gateway.filter.GlobalFilter;
 import org.springframework.core.Ordered;
+import org.springframework.data.redis.core.ReactiveStringRedisTemplate;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.server.reactive.ServerHttpRequest;
@@ -23,65 +24,38 @@ import reactor.core.publisher.Mono;
 
 import java.nio.charset.StandardCharsets;
 
-// ═══════════════════════════════════════════════════════════
-// Tại sao dùng GlobalFilter thay vì RouteFilter?
-//
-// RouteFilter: chỉ áp dụng cho 1 route cụ thể → phải khai báo ở mỗi route
-// GlobalFilter: áp dụng cho TẤT CẢ routes → khai báo 1 lần
-//
-// JWT cần check mọi request (trừ public paths) → GlobalFilter phù hợp hơn
-// ═══════════════════════════════════════════════════════════
-
-// ═══════════════════════════════════════════════════════════
-// Tại sao Gateway dùng reactive (Mono/Flux) thay servlet?
-//
-// Servlet (blocking): mỗi request chiếm 1 thread → 1000 request = 1000 threads
-// Reactive (non-blocking): 1 thread xử lý nhiều request → ít thread hơn, hiệu quả hơn
-//
-// API Gateway nhận rất nhiều traffic → reactive giúp scale tốt hơn
-// Mono<T>: stream 0 hoặc 1 phần tử (như Optional nhưng async)
-// Flux<T>: stream 0..N phần tử
-// ═══════════════════════════════════════════════════════════
-
-// ═══════════════════════════════════════════════════════════
-// JWT validate ở Gateway vs mỗi service tự validate?
-//
-// Cách 1 — Chỉ Gateway validate (cách này):
-//   + Không lặp code ở mỗi service
-//   + Services tin tưởng Gateway (internal network)
-//   - Nếu ai bypass Gateway → service không có bảo vệ
-//
-// Cách 2 — Mỗi service tự validate:
-//   + Bảo mật sâu hơn (defense in depth)
-//   - Lặp code JWT ở mỗi service
-//   - Tăng latency (validate 2 lần)
-//
-// → Chọn Cách 1 vì: internal network đã isolated, đủ an toàn cho tiệm tạp hóa
-// ═══════════════════════════════════════════════════════════
-
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class JwtAuthFilter implements GlobalFilter, Ordered {
 
-    // Constants — tránh magic strings rải rác trong code
     private static final String BEARER_PREFIX = "Bearer ";
     private static final String HEADER_USER_ID = "X-User-Id";
     private static final String HEADER_USER_ROLE = "X-User-Role";
     private static final String CLAIM_ROLE = "role";
+    private static final String BLACKLIST_PREFIX = "bl:";
 
     private final RouteConfig routeConfig;
     private final AntPathMatcher pathMatcher = new AntPathMatcher();
 
+    // ═══════════════════════════════════════════════════════════
+    // Tại sao dùng ReactiveStringRedisTemplate thay vì StringRedisTemplate?
+    //
+    // Gateway là WebFlux (reactive/non-blocking):
+    //   - Mọi operation phải trả về Mono/Flux — không được block thread
+    //   - StringRedisTemplate (blocking): gọi .get() sẽ block thread → phá vỡ reactive model
+    //   - ReactiveStringRedisTemplate: trả Mono<String> → non-blocking → phù hợp WebFlux
+    //
+    // user-service dùng StringRedisTemplate vì nó là servlet (blocking) — OK
+    // api-gateway phải dùng Reactive version vì là WebFlux
+    // ═══════════════════════════════════════════════════════════
+    private final ReactiveStringRedisTemplate redisTemplate;
+
     @Value("${app.jwt.secret}")
     private String jwtSecret;
 
-    // Cache JwtParser — khởi tạo 1 lần lúc startup, tái dùng cho mọi request
-    // Lý do: Jwts.parser().build() (kèm key setup) tốn CPU, không nên gọi mỗi request
     private JwtParser jwtParser;
 
-    // @PostConstruct: chạy sau khi Spring inject xong tất cả dependencies
-    // Đây là nơi an toàn để khởi tạo các object phụ thuộc vào @Value
     @PostConstruct
     private void init() {
         jwtParser = Jwts.parser()
@@ -106,24 +80,45 @@ public class JwtAuthFilter implements GlobalFilter, Ordered {
 
         String token = authHeader.substring(BEARER_PREFIX.length());
 
+        Claims claims;
         try {
-            Claims claims = jwtParser.parseSignedClaims(token).getPayload();
-
-            String userId = claims.getSubject();
-            String userRole = claims.get(CLAIM_ROLE, String.class);
-
-            ServerHttpRequest mutatedRequest = exchange.getRequest().mutate()
-                    .header(HEADER_USER_ID, userId)
-                    .header(HEADER_USER_ROLE, userRole != null ? userRole : "")
-                    .build();
-
-            log.debug("JWT valid for user: {}, role: {}", userId, userRole);
-            return chain.filter(exchange.mutate().request(mutatedRequest).build());
-
+            claims = jwtParser.parseSignedClaims(token).getPayload();
         } catch (JwtException e) {
             log.warn("Invalid JWT token: {}", e.getMessage());
             return unauthorized(exchange);
         }
+
+        String userId = claims.getSubject();
+        String userRole = claims.get(CLAIM_ROLE, String.class);
+        String jti = claims.getId();  // JWT ID — dùng để check blacklist
+
+        // ═══════════════════════════════════════════════════════════
+        // Blacklist check — reactive style
+        //
+        // hasKey() trả Mono<Boolean> → flatMap để chain tiếp
+        // Nếu key tồn tại trong Redis → token đã bị logout → 401
+        // Nếu không → forward request bình thường
+        //
+        // Tại sao check sau khi parse JWT (không phải trước)?
+        //   → Parse JWT để lấy jti (cần jti để query Redis)
+        //   → Nếu JWT invalid thì không cần query Redis
+        //   → Tối ưu: tránh Redis roundtrip khi token sai chữ ký
+        // ═══════════════════════════════════════════════════════════
+        return redisTemplate.hasKey(BLACKLIST_PREFIX + jti)
+                .flatMap(isBlacklisted -> {
+                    if (Boolean.TRUE.equals(isBlacklisted)) {
+                        log.warn("Blacklisted token used for path: {}", path);
+                        return unauthorized(exchange);
+                    }
+
+                    ServerHttpRequest mutatedRequest = exchange.getRequest().mutate()
+                            .header(HEADER_USER_ID, userId)
+                            .header(HEADER_USER_ROLE, userRole != null ? userRole : "")
+                            .build();
+
+                    log.debug("JWT valid for user: {}, role: {}", userId, userRole);
+                    return chain.filter(exchange.mutate().request(mutatedRequest).build());
+                });
     }
 
     private boolean isPublicPath(String path) {

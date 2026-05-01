@@ -5,6 +5,11 @@ spring:
   application:
     name: api-gateway
 
+  data:
+    redis:
+      host: localhost   # dev: localhost | prod: groceryflow-redis
+      port: 6379
+
   cloud:
     gateway:
       routes:
@@ -62,9 +67,8 @@ app:
   public-paths:
     - /api/users/auth/login
     - /api/users/auth/register
+    - /api/users/auth/refresh    # PUBLIC — access token có thể hết hạn khi gọi endpoint này
     - /actuator/**
-    # /actuator/**: health check endpoint của Spring Boot Actuator
-    # Cần accessible không cần auth để monitoring tools check được
 
 # ═══════════════════════════════════════════════════════════
 # Logging — để thấy JWT check trong console khi dev
