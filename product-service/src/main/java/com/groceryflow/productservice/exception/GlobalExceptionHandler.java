@@ -37,6 +37,7 @@ public class GlobalExceptionHandler {
     // Business logic error (tên trùng, barcode trùng, ...) → 400
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ApiResponse<Void>> handleIllegalArgument(IllegalArgumentException ex) {
+        log.warn("Business validation failed: {}", ex.getMessage());
         return ResponseEntity.badRequest().body(ApiResponse.error(ex.getMessage()));
     }
 

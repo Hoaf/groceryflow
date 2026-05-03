@@ -38,10 +38,10 @@ public class Category {
     @Column(length = 255)
     private String description;
 
-    @Column(name = "created_at", updatable = false)
+    @Column(name = "created_at", updatable = false, nullable = false)
     private LocalDateTime createdAt;
 
-    @Column(name = "updated_at")
+    @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
     // @PrePersist: tự động chạy trước khi INSERT vào DB

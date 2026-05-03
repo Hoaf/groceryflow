@@ -63,23 +63,25 @@ public class Product {
     @Column(name = "category_id", nullable = false, length = 36)
     private String categoryId;
 
-    // isActive: soft delete — không xóa thật, chỉ đánh dấu inactive
+    // active: soft delete — không xóa thật, chỉ đánh dấu inactive
     // Tại sao soft delete?
     //   - Giữ lịch sử bán hàng tham chiếu đến product cũ
     //   - Có thể restore nếu xóa nhầm
-    @Column(name = "is_active")
-    private Boolean isActive;
+    // Tại sao dùng boolean (primitive) thay vì Boolean (wrapper)?
+    //   - Lombok với field tên "isXxx" + kiểu Boolean sinh getter isIsXxx() → bug
+    //   - Primitive boolean với field "active" → getter isActive() → đúng chuẩn
+    @Column(name = "is_active", nullable = false)
+    private boolean active = true;
 
-    @Column(name = "created_at", updatable = false)
+    @Column(name = "created_at", updatable = false, nullable = false)
     private LocalDateTime createdAt;
 
-    @Column(name = "updated_at")
+    @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
     @PrePersist
     private void onCreate() {
         if (id == null) id = UUID.randomUUID().toString();
-        if (isActive == null) isActive = true;  // mặc định active khi tạo mới
         createdAt = updatedAt = LocalDateTime.now();
     }
 

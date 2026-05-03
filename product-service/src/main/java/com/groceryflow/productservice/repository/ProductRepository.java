@@ -8,5 +8,5 @@ import java.util.Optional;
 public interface ProductRepository extends JpaRepository<Product, String> {
     Optional<Product> findByBarcode(String barcode);
     List<Product> findByCategoryId(String categoryId);
-    List<Product> findByIsActiveTrue();
+    List<Product> findByActiveTrue();
 }
