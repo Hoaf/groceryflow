@@ -1,5 +1,6 @@
 package com.groceryflow.productservice.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.groceryflow.productservice.dto.request.CreateProductRequest;
 import com.groceryflow.productservice.dto.request.UpdateProductRequest;
 import com.groceryflow.productservice.dto.response.ProductResponse;
@@ -10,10 +11,13 @@ import com.groceryflow.productservice.repository.ProductRepository;
 import com.groceryflow.productservice.repository.StockRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 // ═══════════════════════════════════════════════════════════
 // ProductService — business logic layer cho Product CRUD.
@@ -35,6 +39,40 @@ import java.util.List;
 //   - create(): save product + save stock trong 1 transaction.
 //     Nếu save stock lỗi → rollback save product → không có product thiếu stock.
 //   - Đây là ACID trong action: Atomicity đảm bảo 2 INSERT hoặc không cái nào.
+//
+// ═══════════════════════════════════════════════════════════
+// ## Step 2.3: Cache-Aside Pattern cho Product Info
+//
+// Vấn đề: Mobile app nhân viên gọi GET /products/{id} mỗi lần bán hàng → DB bị hit nhiều.
+//
+// Cách 1: Cache-Through
+//   - Cache đứng trước DB, mọi read/write đều qua cache.
+//   - Pros: app code đơn giản (không cần biết cache).
+//   - Cons: infrastructure phức tạp, ít framework support, khó debug.
+//
+// Cách 2: Write-Through
+//   - Mọi write → update cache ngay, rồi write DB.
+//   - Pros: cache luôn có data mới nhất sau write.
+//   - Cons: write chậm hơn (2 operations: cache + DB), overhead kể cả khi data ít được đọc.
+//
+// Cách 3: Cache-Aside (Lazy Loading) — ĐÃ CHỌN
+//   - App tự quản lý cache: read miss → load DB → populate cache → return.
+//   - Write/Delete → app tự evict (xóa) cache entry cũ.
+//   - Pros:
+//     * App code kiểm soát hoàn toàn logic cache.
+//     * Cache failure không crash app (graceful degradation — catch exception, vẫn dùng DB).
+//     * Chỉ cache data thực sự được đọc (lazy) → tiết kiệm Redis memory.
+//   - Cons:
+//     * First request luôn là cache miss → load từ DB → hơi chậm hơn lần đầu.
+//     * Có thể có khoảng window ngắn inconsistent sau update (evict → cache miss →
+//       request khác load DB cũ) nhưng với TTL 5 phút → acceptable.
+//
+// → Chọn Cache-Aside vì: đơn giản, linh hoạt, phổ biến nhất trong microservices.
+//   Phù hợp để HỌC vì logic rõ ràng, dễ trace.
+//
+// QUAN TRỌNG: Chỉ cache Product INFO, không cache Stock.
+//   - Stock thay đổi liên tục (trừ kho, cộng kho) → stale cache → bán hàng sai số lượng.
+//   - Product info (tên, giá, barcode) ít thay đổi → cache an toàn hơn.
 // ═══════════════════════════════════════════════════════════
 @Service
 @RequiredArgsConstructor
@@ -44,6 +82,78 @@ public class ProductService {
     private final ProductRepository productRepository;
     private final CategoryRepository categoryRepository;
     private final StockRepository stockRepository;
+    private final RedisTemplate<String, String> redisTemplate;
+    private final ObjectMapper objectMapper;
+
+    // Cache key pattern: "product:{id}" — dễ tìm kiếm, debug bằng redis-cli KEYS product:*
+    private static final String CACHE_PREFIX = "product:";
+    // TTL 5 phút: đủ để giảm DB load, đủ ngắn để stale data không ảnh hưởng nhiều.
+    // Trade-off: TTL dài → ít DB hit hơn, nhưng update product cần chờ lâu hơn để thấy.
+    private static final long CACHE_TTL_SECONDS = 300;
+
+    // ─── Private cache helpers ───────────────────────────────
+
+    /**
+     * Tạo cache key từ productId.
+     * Pattern: "product:abc-123-def"
+     */
+    private String cacheKey(String productId) {
+        return CACHE_PREFIX + productId;
+    }
+
+    /**
+     * Ghi ProductResponse vào Redis dưới dạng JSON string.
+     *
+     * Dùng try/catch để graceful degrade: nếu Redis down → log warn, không throw exception.
+     * Tại sao quan trọng?
+     *   - Cache là optimization, không phải requirement.
+     *   - Nếu Redis fail → app vẫn chạy bình thường, chỉ chậm hơn (đọc DB trực tiếp).
+     *   - Throw exception khi cache fail → break business flow → không acceptable.
+     */
+    private void cacheProduct(ProductResponse response) {
+        try {
+            String json = objectMapper.writeValueAsString(response);
+            redisTemplate.opsForValue().set(cacheKey(response.getId()), json, CACHE_TTL_SECONDS, TimeUnit.SECONDS);
+            log.debug("Cached product: id={}, ttl={}s", response.getId(), CACHE_TTL_SECONDS);
+        } catch (Exception e) {
+            log.warn("Failed to cache product {}: {}", response.getId(), e.getMessage());
+        }
+    }
+
+    /**
+     * Xóa cache entry của product khi data thay đổi (update hoặc delete).
+     *
+     * Evict strategy:
+     *   - Sau update: evict → next read sẽ load DB mới → populate cache lại.
+     *   - Không update cache trực tiếp sau write (vì có thể race condition trong
+     *     distributed environment: 2 concurrent updates → cuối cùng cache có data cũ).
+     *   - Pattern này gọi là "evict-on-write" — safe hơn "update-on-write".
+     */
+    private void evictCache(String productId) {
+        redisTemplate.delete(cacheKey(productId));
+        log.debug("Evicted cache for product: id={}", productId);
+    }
+
+    /**
+     * Đọc ProductResponse từ Redis cache.
+     *
+     * Return Optional.empty() trong 2 trường hợp:
+     *   1. Cache miss (key không tồn tại / đã hết TTL).
+     *   2. Cache error (Redis down, JSON parse fail) → graceful degrade.
+     */
+    private Optional<ProductResponse> getFromCache(String productId) {
+        try {
+            String json = redisTemplate.opsForValue().get(cacheKey(productId));
+            if (json != null) {
+                log.debug("Cache HIT for product: id={}", productId);
+                return Optional.of(objectMapper.readValue(json, ProductResponse.class));
+            }
+        } catch (Exception e) {
+            log.warn("Cache read failed for product {}: {}", productId, e.getMessage());
+        }
+        log.debug("Cache MISS for product: id={}", productId);
+        return Optional.empty();
+    }
 
     /**
      * Tạo Product mới.
@@ -129,15 +239,43 @@ public class ProductService {
     }
 
     /**
-     * Lấy product theo ID.
-     * Ném IllegalArgumentException nếu không tìm thấy.
+     * Lấy product theo ID — Cache-Aside pattern.
+     *
+     * Flow:
+     *   1. Check Redis cache → cache HIT: trả về ngay (không cần DB).
+     *   2. Cache MISS (hoặc Redis down): load từ DB.
+     *   3. Sau khi load từ DB: populate cache để request tiếp theo hit cache.
+     *   4. Return ProductResponse.
+     *
+     * Tại sao Cache-Aside phù hợp hơn @Cacheable ở đây?
+     *   - @Cacheable (Spring Cache) cũng implement Cache-Aside, nhưng ẩn logic.
+     *   - Viết explicit giúp hiểu rõ flow: check cache → DB → populate → return.
+     *   - Dễ customize: log cache HIT/MISS, set TTL per-entry, handle error riêng.
+     *
+     * Tại sao dùng @Transactional(readOnly = true) dù đã có cache?
+     *   - Khi cache miss → vẫn cần đọc DB → cần transaction.
+     *   - readOnly=true: Spring tối ưu transaction (không lock, dùng read replica nếu có).
      */
     @Transactional(readOnly = true)
     public ProductResponse findById(String id) {
         log.debug("Fetching product by id: {}", id);
+
+        // Step 1: Check Redis cache
+        Optional<ProductResponse> cached = getFromCache(id);
+        if (cached.isPresent()) {
+            return cached.get();
+        }
+
+        // Step 2: Cache miss — load from DB
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Product not found: " + id));
-        return ProductResponse.from(product);
+
+        ProductResponse response = ProductResponse.from(product);
+
+        // Step 3: Populate cache for next request
+        cacheProduct(response);
+
+        return response;
     }
 
     /**
@@ -237,7 +375,16 @@ public class ProductService {
         Product saved = productRepository.save(product);
         log.info("Product updated: id={}", saved.getId());
 
-        return ProductResponse.from(saved);
+        // Step 7: Evict old cache → re-cache fresh data.
+        // Tại sao evict trước rồi cache lại, không chỉ update cache trực tiếp?
+        //   - Evict + re-cache: nếu cacheProduct() fail → cache miss next time → load DB → consistent.
+        //   - Chỉ update cache: nếu fail halfway → stale data trong cache → inconsistent.
+        //   - Với single-instance service, update trực tiếp cũng safe,
+        //     nhưng evict-first là pattern an toàn hơn cho distributed.
+        ProductResponse response = ProductResponse.from(saved);
+        evictCache(id);
+        cacheProduct(response);
+        return response;
     }
 
     /**
@@ -264,6 +411,13 @@ public class ProductService {
 
         product.setActive(false);
         productRepository.save(product);
+
+        // Evict cache sau soft delete: product đã inactive → không nên cache nữa.
+        // Nếu client gọi findById() với id này → cache miss → load DB → thấy active=false
+        // → GlobalExceptionHandler trả 404 (hoặc service có thể check active=false → throw).
+        // Hiện tại findById() không check active → vẫn trả về product với active=false.
+        // Việc evict cache đảm bảo client thấy trạng thái mới nhất sau next request.
+        evictCache(id);
 
         log.info("Product soft-deleted: id={}", id);
     }
