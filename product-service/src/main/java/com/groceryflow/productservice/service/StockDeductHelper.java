@@ -12,6 +12,7 @@ import com.groceryflow.productservice.repository.StockRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import java.util.HashMap;
 import java.util.List;
@@ -55,7 +56,10 @@ public class StockDeductHelper {
                 toJson(buildDeductedPayload(event))));
     }
 
-    @Transactional
+    // REQUIRES_NEW: if deductAllInTransaction() rolled back, its transaction is done.
+    // Using REQUIRES_NEW guarantees a fresh transaction even if a caller ever adds
+    // @Transactional — prevents joining a rollback-only transaction silently.
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void saveDeductFailedEvent(String orderId, String reason) {
         Map<String, Object> payload = new HashMap<>();
         payload.put("orderId", orderId);
