@@ -7,7 +7,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -34,22 +33,19 @@ public class KafkaOutboxPublisher {
     private final KafkaTemplate<String, String> kafkaTemplate;
 
     @Scheduled(fixedDelay = 1000) // mỗi 1 giây sau khi job trước xong
-    @Transactional
     public void publishPendingEvents() {
-        List<OutboxEvent> pending = outboxEventRepository.findByPublishedFalse();
+        List<OutboxEvent> pending = outboxEventRepository
+                .findTop100ByPublishedFalseOrderByCreatedAtAsc();
         if (pending.isEmpty()) return;
 
         for (OutboxEvent event : pending) {
             try {
-                // Key = event.getId() (UUID) → consumer dùng làm eventId cho idempotency
-                kafkaTemplate.send(event.getTopic(), event.getId(), event.getPayload());
+                kafkaTemplate.send(event.getTopic(), event.getId(), event.getPayload()).get();
                 event.setPublished(true);
                 event.setPublishedAt(LocalDateTime.now());
                 outboxEventRepository.save(event);
                 log.debug("Published outbox event: id={}, topic={}", event.getId(), event.getTopic());
             } catch (Exception e) {
-                // Log lỗi nhưng không rethrow → tiếp tục với event tiếp theo
-                // Event này sẽ được retry ở lần chạy tiếp theo (published vẫn = false)
                 log.warn("Failed to publish outbox event: id={}, topic={}, error={}",
                         event.getId(), event.getTopic(), e.getMessage());
             }

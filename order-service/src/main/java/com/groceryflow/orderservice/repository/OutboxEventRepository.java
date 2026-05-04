@@ -7,4 +7,5 @@ import java.util.List;
 
 public interface OutboxEventRepository extends JpaRepository<OutboxEvent, String> {
     List<OutboxEvent> findByPublishedFalse();
+    List<OutboxEvent> findTop100ByPublishedFalseOrderByCreatedAtAsc();
 }
