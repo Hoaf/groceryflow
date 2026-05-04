@@ -87,6 +87,14 @@ public class OrderService {
         log.warn("Order cancelled: orderId={}, reason={}", orderId, reason);
     }
 
+    // ── Step 2.7: getOrder ────────────────────────────────────
+    public OrderResponse getOrder(String id) {
+        Order order = orderRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Order not found: " + id));
+        List<OrderItem> items = orderItemRepository.findAllByOrderId(id);
+        return OrderResponse.from(order, items);
+    }
+
     // ── Timeout job ────────────────────────────────────────────
     // Tại sao cần? product-service có thể down → Order mãi PENDING
     // → @Scheduled cancel sau 10 phút
