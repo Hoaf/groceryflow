@@ -1,7 +1,7 @@
 CREATE TABLE orders (
     id           VARCHAR(36)    PRIMARY KEY,
     user_id      VARCHAR(36)    NOT NULL,
-    status       ENUM('PENDING','CONFIRMED','CANCELLED') NOT NULL DEFAULT 'PENDING',
+    status       VARCHAR(20)    NOT NULL DEFAULT 'PENDING',
     total_amount DECIMAL(12,2)  NOT NULL,
     created_at   DATETIME       NOT NULL,
     updated_at   DATETIME       NOT NULL,

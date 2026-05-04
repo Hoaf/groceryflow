@@ -19,8 +19,10 @@ public class ProcessedEvent {
     @Column(name = "processed_at", nullable = false)
     private LocalDateTime processedAt;
 
-    public ProcessedEvent(String eventId) {
-        this.eventId = eventId;
-        this.processedAt = LocalDateTime.now();
+    public static ProcessedEvent of(String eventId) {
+        return ProcessedEvent.builder()
+                .eventId(eventId)
+                .processedAt(LocalDateTime.now())
+                .build();
     }
 }
