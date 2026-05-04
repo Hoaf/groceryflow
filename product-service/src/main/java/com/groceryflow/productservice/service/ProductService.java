@@ -185,15 +185,13 @@ public class ProductService {
         //   - null: sản phẩm không có mã vạch → skip check.
         //   - blank ("" hoặc "   "): client gửi rỗng → treat as null → skip check.
         //   - Nếu không làm vậy: 2 sản phẩm không có barcode sẽ xung đột nhau.
-        String barcode = request.getBarcode();
-        if (barcode != null && !barcode.isBlank()) {
+        String rawBarcode = request.getBarcode();
+        final String barcode = (rawBarcode != null && !rawBarcode.isBlank()) ? rawBarcode : null;
+        if (barcode != null) {
             productRepository.findByBarcode(barcode).ifPresent(existing -> {
                 throw new IllegalArgumentException(
                         "Product with barcode '" + barcode + "' already exists");
             });
-        } else {
-            // Normalize: blank string → null để tránh lưu "" vào DB
-            barcode = null;
         }
 
         // Step 3: Build và save Product
@@ -344,17 +342,15 @@ public class ProductService {
                         "Category not found: " + request.getCategoryId()));
 
         // Step 3: Check barcode duplicate (exclude self)
-        String newBarcode = request.getBarcode();
-        if (newBarcode != null && !newBarcode.isBlank()) {
+        String rawNewBarcode = request.getBarcode();
+        final String newBarcode = (rawNewBarcode != null && !rawNewBarcode.isBlank()) ? rawNewBarcode : null;
+        if (newBarcode != null) {
             productRepository.findByBarcode(newBarcode)
                     .filter(existing -> !existing.getId().equals(id))
                     .ifPresent(existing -> {
                         throw new IllegalArgumentException(
                                 "Product with barcode '" + newBarcode + "' already exists");
                     });
-        } else {
-            // Normalize blank → null
-            newBarcode = null;
         }
 
         // Step 4: Update fields
